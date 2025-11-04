@@ -1,0 +1,9 @@
+# AWS Region
+aws_region = "us-east-1"
+
+# Optional: Enable point-in-time recovery (adds cost, ~$0.20/GB/month)
+enable_point_in_time_recovery = false
+
+# Optional: Enable TTL for automatic cleanup of old price history
+# When enabled, you can set expiry_time on items to auto-delete them
+enable_ttl = true
