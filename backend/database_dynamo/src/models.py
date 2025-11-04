@@ -275,9 +275,14 @@ class Positions:
     """
     Positions table operations with ENHANCED HISTORY TRACKING
 
-    Uses dual-record pattern:
-    - POSITION#<symbol>#CURRENT → Fast access to current position
-    - POSITION#<symbol>#<timestamp> → Historical records
+    Optimized SK pattern for efficient queries:
+    - CURRENT#<symbol> → Fast access to current positions (no historical data retrieved)
+    - HISTORY#<symbol>#<timestamp> → Historical records
+
+    This pattern ensures:
+    - Current position queries only read what's needed (no filtering of historical data)
+    - Historical queries still efficient with begins_with
+    - Significantly reduced read capacity for common operations
     """
 
     def __init__(self, users_table, instruments_table):
@@ -285,23 +290,25 @@ class Positions:
         self.instruments_table = instruments_table
 
     def find_by_account(self, account_id: str) -> List[Dict]:
-        """Get current positions for an account (fast lookup via CURRENT pointer)"""
+        """
+        Get current positions for an account (optimized query - no historical data retrieved)
+
+        Query pattern: PK = ACCOUNT#<id>, SK begins_with CURRENT#
+        Only retrieves current positions, ignoring all historical records
+        """
         response = self.table.query(
             KeyConditionExpression='PK = :pk AND begins_with(SK, :sk)',
-            FilterExpression='contains(SK, :current)',
             ExpressionAttributeValues={
                 ':pk': f'ACCOUNT#{account_id}',
-                ':sk': 'POSITION#',
-                ':current': '#CURRENT'
+                ':sk': 'CURRENT#'
             }
         )
 
-        # Parse results
+        # Parse results - SK format: CURRENT#SPY
         positions = []
         for item in response.get('Items', []):
-            # SK format: POSITION#SPY#CURRENT
             parts = item['SK'].split('#')
-            if len(parts) >= 2:
+            if len(parts) >= 2:  # Should be ['CURRENT', 'SPY']
                 symbol = parts[1]
                 positions.append({
                     'symbol': symbol,
@@ -318,9 +325,11 @@ class Positions:
         """
         ENHANCED: Add or update a position with full history tracking
 
-        Creates two records:
-        1. Historical record: POSITION#<symbol>#<timestamp>
-        2. CURRENT pointer: POSITION#<symbol>#CURRENT
+        Creates two records with optimized SK pattern:
+        1. Historical record: HISTORY#<symbol>#<timestamp>
+        2. CURRENT record: CURRENT#<symbol>
+
+        The CURRENT record is overwritten with each update, maintaining only the latest state.
         """
         timestamp = datetime.utcnow().isoformat()
 
@@ -328,7 +337,7 @@ class Positions:
         self.table.put_item(
             Item={
                 'PK': f'ACCOUNT#{account_id}',
-                'SK': f'POSITION#{symbol}#{timestamp}',
+                'SK': f'HISTORY#{symbol}#{timestamp}',
                 'quantity': quantity,
                 'action': action,
                 'timestamp': timestamp,
@@ -336,11 +345,11 @@ class Positions:
             }
         )
 
-        # 2. Update CURRENT pointer
+        # 2. Update CURRENT record (overwrites previous)
         self.table.put_item(
             Item={
                 'PK': f'ACCOUNT#{account_id}',
-                'SK': f'POSITION#{symbol}#CURRENT',
+                'SK': f'CURRENT#{symbol}',
                 'quantity': quantity,
                 'timestamp': timestamp,
                 'as_of_date': date.today().isoformat()
@@ -353,25 +362,23 @@ class Positions:
         """
         ENHANCED: Get positions as they were at a specific date
         Returns the most recent position before target_date for each symbol
+
+        Query pattern: PK = ACCOUNT#<id>, SK BETWEEN HISTORY# and HISTORY#~<date>
         """
-        # Query all position records up to target date
+        # Query all historical records up to target date
         response = self.table.query(
             KeyConditionExpression='PK = :pk AND SK BETWEEN :start AND :end',
             ExpressionAttributeValues={
                 ':pk': f'ACCOUNT#{account_id}',
-                ':start': 'POSITION#',
-                ':end': f'POSITION#~{target_date.isoformat()}'
+                ':start': 'HISTORY#',
+                ':end': f'HISTORY#~{target_date.isoformat()}'
             }
         )
 
         # Group by symbol and keep most recent before target_date
         positions_by_symbol = {}
         for item in response.get('Items', []):
-            # Skip CURRENT pointers
-            if '#CURRENT' in item['SK']:
-                continue
-
-            # Parse SK: POSITION#SPY#2025-01-15T14:30:00Z
+            # Parse SK: HISTORY#SPY#2025-01-15T14:30:00Z
             parts = item['SK'].split('#')
             if len(parts) < 3:
                 continue
@@ -403,6 +410,8 @@ class Positions:
         """
         ENHANCED: Get complete change history for a single position
         Useful for auditing and transaction history
+
+        Query pattern: PK = ACCOUNT#<id>, SK BETWEEN HISTORY#<symbol>#<start> and HISTORY#<symbol>#<end>
         """
         if not start_date:
             start_date = datetime(2020, 1, 1)
@@ -411,12 +420,10 @@ class Positions:
 
         response = self.table.query(
             KeyConditionExpression='PK = :pk AND SK BETWEEN :start AND :end',
-            FilterExpression='NOT contains(SK, :current)',
             ExpressionAttributeValues={
                 ':pk': f'ACCOUNT#{account_id}',
-                ':start': f'POSITION#{symbol}#{start_date.isoformat()}',
-                ':end': f'POSITION#{symbol}#{end_date.isoformat()}',
-                ':current': '#CURRENT'
+                ':start': f'HISTORY#{symbol}#{start_date.isoformat()}',
+                ':end': f'HISTORY#{symbol}#{end_date.isoformat()}'
             },
             ScanIndexForward=True
         )
