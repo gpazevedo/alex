@@ -113,25 +113,24 @@ resource "aws_iam_role_policy" "lambda_agents_policy" {
         ]
         Resource = "arn:aws:lambda:${var.aws_region}:${data.aws_caller_identity.current.account_id}:function:alex-*"
       },
-      # Aurora Data API access
+      # DynamoDB access
       {
         Effect = "Allow"
         Action = [
-          "rds-data:ExecuteStatement",
-          "rds-data:BatchExecuteStatement",
-          "rds-data:BeginTransaction",
-          "rds-data:CommitTransaction",
-          "rds-data:RollbackTransaction"
+          "dynamodb:GetItem",
+          "dynamodb:PutItem",
+          "dynamodb:UpdateItem",
+          "dynamodb:DeleteItem",
+          "dynamodb:Query",
+          "dynamodb:Scan",
+          "dynamodb:BatchGetItem",
+          "dynamodb:BatchWriteItem"
         ]
-        Resource = var.aurora_cluster_arn
-      },
-      # Secrets Manager for database credentials
-      {
-        Effect = "Allow"
-        Action = [
-          "secretsmanager:GetSecretValue"
+        Resource = [
+          var.dynamodb_users_table_arn,
+          var.dynamodb_instruments_table_arn,
+          "${var.dynamodb_users_table_arn}/index/*"
         ]
-        Resource = var.aurora_secret_arn
       },
       # S3 Vectors access for all agents
       {
@@ -235,9 +234,9 @@ resource "aws_lambda_function" "planner" {
   
   environment {
     variables = {
-      AURORA_CLUSTER_ARN = var.aurora_cluster_arn
-      AURORA_SECRET_ARN  = var.aurora_secret_arn
-      DATABASE_NAME      = "alex"
+      DYNAMODB_USERS_TABLE = var.dynamodb_users_table_name
+      DYNAMODB_INSTRUMENTS_TABLE = var.dynamodb_instruments_table_name
+      
       VECTOR_BUCKET      = var.vector_bucket
       BEDROCK_MODEL_ID   = var.bedrock_model_id
       BEDROCK_REGION     = var.bedrock_region
@@ -286,9 +285,9 @@ resource "aws_lambda_function" "tagger" {
 
   environment {
     variables = {
-      AURORA_CLUSTER_ARN = var.aurora_cluster_arn
-      AURORA_SECRET_ARN  = var.aurora_secret_arn
-      DATABASE_NAME      = "alex"
+      DYNAMODB_USERS_TABLE = var.dynamodb_users_table_name
+      DYNAMODB_INSTRUMENTS_TABLE = var.dynamodb_instruments_table_name
+      
       BEDROCK_MODEL_ID   = var.bedrock_model_id
       BEDROCK_REGION     = var.bedrock_region
       DEFAULT_AWS_REGION = var.aws_region
@@ -326,9 +325,9 @@ resource "aws_lambda_function" "reporter" {
   
   environment {
     variables = {
-      AURORA_CLUSTER_ARN = var.aurora_cluster_arn
-      AURORA_SECRET_ARN  = var.aurora_secret_arn
-      DATABASE_NAME      = "alex"
+      DYNAMODB_USERS_TABLE = var.dynamodb_users_table_name
+      DYNAMODB_INSTRUMENTS_TABLE = var.dynamodb_instruments_table_name
+      
       BEDROCK_MODEL_ID   = var.bedrock_model_id
       BEDROCK_REGION     = var.bedrock_region
       DEFAULT_AWS_REGION = var.aws_region
@@ -367,9 +366,9 @@ resource "aws_lambda_function" "charter" {
   
   environment {
     variables = {
-      AURORA_CLUSTER_ARN = var.aurora_cluster_arn
-      AURORA_SECRET_ARN  = var.aurora_secret_arn
-      DATABASE_NAME      = "alex"
+      DYNAMODB_USERS_TABLE = var.dynamodb_users_table_name
+      DYNAMODB_INSTRUMENTS_TABLE = var.dynamodb_instruments_table_name
+      
       BEDROCK_MODEL_ID   = var.bedrock_model_id
       BEDROCK_REGION     = var.bedrock_region
       DEFAULT_AWS_REGION = var.aws_region
@@ -407,9 +406,9 @@ resource "aws_lambda_function" "retirement" {
   
   environment {
     variables = {
-      AURORA_CLUSTER_ARN = var.aurora_cluster_arn
-      AURORA_SECRET_ARN  = var.aurora_secret_arn
-      DATABASE_NAME      = "alex"
+      DYNAMODB_USERS_TABLE = var.dynamodb_users_table_name
+      DYNAMODB_INSTRUMENTS_TABLE = var.dynamodb_instruments_table_name
+      
       BEDROCK_MODEL_ID   = var.bedrock_model_id
       BEDROCK_REGION     = var.bedrock_region
       DEFAULT_AWS_REGION = var.aws_region

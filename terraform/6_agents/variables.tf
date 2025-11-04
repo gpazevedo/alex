@@ -3,13 +3,23 @@ variable "aws_region" {
   type        = string
 }
 
-variable "aurora_cluster_arn" {
-  description = "ARN of the Aurora cluster from Part 5"
+variable "dynamodb_users_table_name" {
+  description = "Name of the DynamoDB users table from Part 5"
   type        = string
 }
 
-variable "aurora_secret_arn" {
-  description = "ARN of the Secrets Manager secret from Part 5"
+variable "dynamodb_users_table_arn" {
+  description = "ARN of the DynamoDB users table from Part 5"
+  type        = string
+}
+
+variable "dynamodb_instruments_table_name" {
+  description = "Name of the DynamoDB instruments table from Part 5"
+  type        = string
+}
+
+variable "dynamodb_instruments_table_arn" {
+  description = "ARN of the DynamoDB instruments table from Part 5"
   type        = string
 }
 
