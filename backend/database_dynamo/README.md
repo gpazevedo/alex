@@ -16,7 +16,8 @@ DynamoDB-based database package for Alex Financial Planner with enhanced positio
 User-specific data with single-table design:
 - Users (PK: USER#<id>, SK: METADATA)
 - Accounts (PK: USER#<id>, SK: ACCOUNT#<uuid>)
-- Positions with history (PK: ACCOUNT#<uuid>, SK: POSITION#<symbol>#<timestamp|CURRENT>)
+- Current positions (PK: ACCOUNT#<uuid>, SK: CURRENT#<symbol>)
+- Position history (PK: ACCOUNT#<uuid>, SK: HISTORY#<symbol>#<timestamp>)
 - Jobs (PK: USER#<id>, SK: JOB#<timestamp>#<uuid>)
 
 ### alex-instruments
@@ -26,21 +27,27 @@ Instrument reference data with price history:
 
 ## Enhanced Position Tracking
 
+**Optimized SK Pattern** for efficient queries:
+
 Every position change creates two records:
 
-1. **Historical record**: `POSITION#SPY#2025-01-15T14:30:00Z`
+1. **Historical record**: `HISTORY#SPY#2025-01-15T14:30:00Z`
    - Stores quantity, action (BUY/SELL/TRANSFER), timestamp
    - Enables complete audit trail
+   - Grouped by HISTORY# prefix for efficient historical queries
 
-2. **CURRENT pointer**: `POSITION#SPY#CURRENT`
-   - Fast O(1) access to latest position
-   - Avoids filtering through history for current state
+2. **CURRENT record**: `CURRENT#SPY`
+   - Fast access to latest positions (no historical data retrieved)
+   - Grouped by CURRENT# prefix for optimized queries
+   - Overwritten with each update
 
 Benefits:
-- ✅ True portfolio evolution (actual position changes over time)
-- ✅ Complete audit trail (regulatory compliance, tax reporting)
-- ✅ Time-travel queries (see portfolio at any historical date)
-- ✅ Fast current lookups (via CURRENT pointer)
+- ✅ **Optimized queries** - Current positions don't retrieve historical data
+- ✅ **Reduced read capacity** - Only reads what's needed for current positions
+- ✅ **True portfolio evolution** - Actual position changes over time
+- ✅ **Complete audit trail** - Regulatory compliance, tax reporting
+- ✅ **Time-travel queries** - Calculate portfolio value at any historical date
+- ✅ **Fast current lookups** - SK begins_with CURRENT# returns only current positions
 
 ## Usage
 

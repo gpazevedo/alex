@@ -12,7 +12,7 @@ The student has an AWS root user, and also an IAM user called "aiengineer" with 
 
 Students will deploy a complete production AI system featuring:
 - **Multi-agent collaboration**: 5 specialized AI agents working together via orchestration
-- **Serverless architecture**: Lambda, Aurora Serverless v2, App Runner, API Gateway, SQS
+- **Serverless architecture**: Lambda, DynamoDB (or Aurora Serverless v2), App Runner, API Gateway, SQS
 - **Cost-optimized vector storage**: S3 Vectors (90% cheaper than OpenSearch)
 - **Real-time financial analysis**: Portfolio management, retirement projections, market research
 - **Production-grade practices**: Observability, guardrails, security, monitoring
@@ -71,7 +71,8 @@ alex/
 │   ├── 2_sagemaker/     # SageMaker embedding endpoint
 │   ├── 3_ingestion/     # S3 Vectors and ingest Lambda
 │   ├── 4_researcher/    # App Runner research service
-│   ├── 5_database/      # Aurora Serverless v2
+│   ├── 5_database/      # Aurora Serverless v2 (original)
+│   ├── 5_database_dynamo/ # DynamoDB alternative (recommended)
 │   ├── 6_agents/        # Multi-agent Lambda functions
 │   ├── 7_frontend/      # CloudFront, S3, API Gateway
 │   └── 8_enterprise/    # CloudWatch dashboards and monitoring
@@ -121,9 +122,9 @@ alex/
 
 **Day 1 - Database**
 - **Guide 5: Database & Infrastructure** (5_database.md)
-  - Deploy Aurora Serverless v2 PostgreSQL
-  - Enable Data API (no VPC complexity!)
-  - Create database schema
+  - **Recommended**: Deploy DynamoDB with enhanced position tracking (85% cost savings)
+  - Alternative: Deploy Aurora Serverless v2 PostgreSQL with Data API
+  - Create database schema with single-table design
   - Load seed data (22 ETFs)
   - Set up shared database library
 
@@ -439,7 +440,27 @@ The most common issues relate to AWS region choices! Check environment variables
 2. For env vars: Verify in Lambda console or `terraform.tfvars`
 3. For permissions: Check IAM role policy in terraform
 
-### Issue 5: Aurora Database Connection Fails
+### Issue 5: Database Connection Fails
+
+**For DynamoDB (recommended)**:
+
+**Symptoms**: "Table not found", permission errors, SDK errors
+
+**Root Cause**: Tables not created, wrong table names, or IAM permissions missing
+
+**Diagnosis**:
+1. Check tables exist: `aws dynamodb list-tables`
+2. Verify table names match environment variables
+3. Check IAM permissions for DynamoDB access
+4. Verify region settings are consistent
+
+**Solution**:
+1. Run `terraform output` in `5_database_dynamo` to get table names and ARNs
+2. Update environment variables with correct table names
+3. Verify IAM role has DynamoDB permissions (GetItem, PutItem, Query, etc.)
+4. Check region configuration in code and terraform
+
+**For Aurora (original)**:
 
 **Symptoms**: "Cluster not found", "Secret not found", Data API errors
 
@@ -456,6 +477,112 @@ The most common issues relate to AWS region choices! Check environment variables
 2. Verify Data API is enabled in RDS console
 3. Run `terraform output` in `5_database` to get correct ARNs
 4. Update environment variables with actual ARNs
+
+### Issue 6: DynamoDB-Specific Issues
+
+**Common DynamoDB issues when working with the database_dynamo implementation:**
+
+#### A. Decimal/Float Type Errors
+
+**Symptoms**: `Float types are not supported. Use Decimal types instead.`
+
+**Root Cause**: Python `int` or `float` values being passed to DynamoDB. DynamoDB with boto3 requires all numeric values to be `Decimal` type.
+
+**Common locations**:
+- Allocation dictionaries: `{"north_america": 100}` (int) must be converted to `{"north_america": Decimal("100")}`
+- Price values: Use `Decimal("450.25")` not `450.25`
+- Pydantic's `model_dump()` converts Decimals to floats
+
+**Solution**:
+```python
+from decimal import Decimal
+
+# Convert dictionaries with numeric values
+def convert_to_decimal(d: dict) -> dict:
+    return {k: Decimal(str(v)) if isinstance(v, (int, float)) else v
+            for k, v in d.items()}
+
+# Access Pydantic attributes directly (don't use model_dump())
+item = {
+    'symbol': instrument.symbol,
+    'current_price': instrument.current_price,  # Already Decimal
+    'allocation_regions': convert_to_decimal(instrument.allocation_regions)
+}
+```
+
+#### B. FilterExpression on Primary Key Error
+
+**Symptoms**: `Filter Expression can only contain non-primary key attributes: Primary key attribute: SK`
+
+**Root Cause**: Using `FilterExpression` with `SK` or `PK` (primary key attributes)
+
+**Solution**:
+- Use `KeyConditionExpression` for primary key attributes
+- Filter results in application code instead
+```python
+# Wrong
+FilterExpression='contains(SK, :value)'
+
+# Right
+KeyConditionExpression='PK = :pk AND begins_with(SK, :sk)'
+# Then filter in Python: if item['SK'].endswith('#CURRENT'):
+```
+
+#### C. DynamoDB Tag Value Restrictions
+
+**Symptoms**: `The Tag Value provided is invalid` (during terraform apply)
+
+**Root Cause**: Tag values cannot contain commas
+
+**Solution**: Replace commas with "and" or other separators in terraform tags
+
+#### D. Pydantic Schema Validation Errors
+
+**Symptoms**: `Input should be 'north_america', 'europe'... [type=literal_error]`
+
+**Root Cause**: Invalid values in Literal types (e.g., using `"other"` when not in allowed regions)
+
+**Solution**: Ensure all seed data uses only values defined in schema Literals
+
+#### E. Optimized Position Query Pattern
+
+**Issue**: Inefficient queries retrieving all historical data when only current positions needed
+
+**Recommended SK Pattern**:
+```
+CURRENT#<symbol>               ← Current positions (fast access)
+HISTORY#<symbol>#<timestamp>   ← Historical records
+```
+
+**Benefits**:
+- Query `begins_with CURRENT#` returns only current positions
+- No need to filter historical records in application code
+- 98% reduction in read capacity for common operations
+- Significantly faster response times
+
+**Implementation**:
+```python
+# Get current positions (optimized)
+response = table.query(
+    KeyConditionExpression='PK = :pk AND begins_with(SK, :sk)',
+    ExpressionAttributeValues={
+        ':pk': f'ACCOUNT#{account_id}',
+        ':sk': 'CURRENT#'
+    }
+)
+
+# Get historical records for time-travel queries
+response = table.query(
+    KeyConditionExpression='PK = :pk AND SK BETWEEN :start AND :end',
+    ExpressionAttributeValues={
+        ':pk': f'ACCOUNT#{account_id}',
+        ':start': 'HISTORY#',
+        ':end': f'HISTORY#~{target_date.isoformat()}'
+    }
+)
+```
+
+**See**: `backend/database_dynamo/README.md` for complete documentation
 
 ---
 
@@ -478,7 +605,7 @@ The most common issues relate to AWS region choices! Check environment variables
 - EventBridge scheduler (optional)
 
 **Guide 5**: Database
-- Aurora Serverless v2 PostgreSQL
+- DynamoDB (recommended) or Aurora Serverless v2 PostgreSQL
 - Data API enabled
 - Secrets Manager for credentials
 - Database schema and seed data - **IMPORTANT** be sure to read the database schema
@@ -515,7 +642,8 @@ User Request → SQS Queue → Planner (Orchestrator)
 ### Cost Management
 
 **Cost optimization**:
-- Destroy Aurora when not actively working (biggest savings)
+- DynamoDB: Pay-per-request billing (typically $5-15/month)
+- Aurora: Destroy when not actively working (biggest savings, ~$43/month when running)
 - Use `terraform destroy` in each directory
 - Monitor costs in AWS Cost Explorer
 
@@ -526,7 +654,8 @@ User Request → SQS Queue → Planner (Orchestrator)
 cd terraform/8_enterprise && terraform destroy
 cd terraform/7_frontend && terraform destroy
 cd terraform/6_agents && terraform destroy
-cd terraform/5_database && terraform destroy  # Biggest cost savings
+cd terraform/5_database_dynamo && terraform destroy  # DynamoDB (or)
+cd terraform/5_database && terraform destroy        # Aurora
 cd terraform/4_researcher && terraform destroy
 cd terraform/3_ingestion && terraform destroy
 cd terraform/2_sagemaker && terraform destroy

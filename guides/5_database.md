@@ -37,6 +37,25 @@ We chose **Aurora Serverless v2 with Data API** because it offers:
 
 For students learning AWS, this removes the complexity of VPCs, security groups, and connection management while providing a production-grade database that works seamlessly with Lambda functions.
 
+### DynamoDB Alternative Available
+
+**NEW**: A cost-optimized DynamoDB implementation is now available in the `backend/database_dynamo` directory and `terraform/5_database_dynamo`. This alternative offers:
+
+- **85% cost reduction**: ~$5-15/month vs ~$43/month for Aurora
+- **Pay-per-request billing**: No minimum charges when inactive
+- **No VPC, no connection management**: True serverless database
+- **Enhanced position tracking**: Complete audit trail of portfolio changes over time
+- **Two-table design** - Optimized for access patterns with DynamoDB best practices
+- **Price history** - Integrated into instruments table
+- **Time-travel queries** - Calculate portfolio value at any historical date
+- **API compatible** - Drop-in replacement for Aurora version
+
+The DynamoDB implementation maintains API compatibility with the Aurora version, so all agent code works without changes. Students can choose either database backend based on their learning goals:
+- **Aurora** (this guide): Learn SQL, relational databases, and traditional data modeling
+- **DynamoDB** (`5_database_dynamo`): Learn NoSQL, single-table design, and cost optimization
+
+Both implementations are fully supported and production-ready. The rest of this guide covers the Aurora implementation.
+
 ## What We're Building
 
 In this guide, you'll deploy:
