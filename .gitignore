@@ -232,3 +232,4 @@ backend/**/*_lambda.zip
 !backend/scheduler/lambda_function.zip
 !frontend/libmagiatotal-website.tar.gz
 magiatotal-website.zip
+magiatotal-website/
